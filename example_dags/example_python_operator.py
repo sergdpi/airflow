@@ -1,105 +1,56 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
+"""Example DAG demonstrating the usage of the BashOperator."""
 
-"""Example DAG demonstrating the usage of the PythonOperator."""
-import time
-from pprint import pprint
+from datetime import timedelta
 
 from airflow import DAG
-from airflow.operators.python import PythonOperator, PythonVirtualenvOperator
+from airflow.operators.bash_operator import BashOperator
+from airflow.operators.dummy_operator import DummyOperator
 from airflow.utils.dates import days_ago
 
 args = {
     'owner': 'airflow',
+    'start_date': days_ago(2),
 }
 
 dag = DAG(
-    dag_id='example_python_operator',
+    dag_id='example_bash_operator_gitsync',
     default_args=args,
-    schedule_interval=None,
-    start_date=days_ago(2),
+    schedule_interval='0 0 * * *',
+    dagrun_timeout=timedelta(minutes=60),
     tags=['example']
 )
 
-
-# [START howto_operator_python]
-def print_context(ds, **kwargs):
-    """Print the Airflow context and ds variable from the context."""
-    pprint(kwargs)
-    print(ds)
-    return 'Whatever you return gets printed in the logs'
-
-
-run_this = PythonOperator(
-    task_id='print_the_context',
-    python_callable=print_context,
+run_this_last = DummyOperator(
+    task_id='run_this_last',
     dag=dag,
 )
-# [END howto_operator_python]
 
+# [START howto_operator_bash]
+run_this = BashOperator(
+    task_id='run_after_loop',
+    bash_command='echo 1',
+    dag=dag,
+)
+# [END howto_operator_bash]
 
-# [START howto_operator_python_kwargs]
-def my_sleeping_function(random_base):
-    """This is a function that will run within the DAG execution"""
-    time.sleep(random_base)
+run_this >> run_this_last
 
-
-# Generate 5 sleeping tasks, sleeping from 0.0 to 0.4 seconds respectively
-for i in range(5):
-    task = PythonOperator(
-        task_id='sleep_for_' + str(i),
-        python_callable=my_sleeping_function,
-        op_kwargs={'random_base': float(i) / 10},
+for i in range(3):
+    task = BashOperator(
+        task_id='runme_' + str(i),
+        bash_command='echo "{{ task_instance_key_str }}" && sleep 1',
         dag=dag,
     )
+    task >> run_this
 
-    run_this >> task
-# [END howto_operator_python_kwargs]
-
-
-# [START howto_operator_python_venv]
-def callable_virtualenv():
-    """
-    Example function that will be performed in a virtual environment.
-
-    Importing at the module level ensures that it will not attempt to import the
-    library before it is installed.
-    """
-    from time import sleep
-
-    from colorama import Back, Fore, Style
-    print(Fore.RED + 'some red text')
-    print(Back.GREEN + 'and with a green background')
-    print(Style.DIM + 'and in dim text')
-    print(Style.RESET_ALL)
-    for _ in range(10):
-        print(Style.DIM + 'Please wait...', flush=True)
-        sleep(10)
-    print('Finished')
-
-
-virtualenv_task = PythonVirtualenvOperator(
-    task_id="virtualenv_python",
-    python_callable=callable_virtualenv,
-    requirements=[
-        "colorama==0.4.0"
-    ],
-    system_site_packages=False,
+# [START howto_operator_bash_template]
+also_run_this = BashOperator(
+    task_id='also_run_this',
+    bash_command='echo "run_id={{ run_id }} | dag_run={{ dag_run }}"',
     dag=dag,
 )
-# [END howto_operator_python_venv]
+# [END howto_operator_bash_template]
+also_run_this >> run_this_last
+
+if __name__ == "__main__":
+    dag.cli()
